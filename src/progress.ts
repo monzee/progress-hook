@@ -119,11 +119,15 @@ export function useProgressOf<P extends any[], T, S>(
   const [state, dispatch] = useState<State>({ tag: "idle" });
   const my = useRef({
     aborted: false,
-    cleanUp: pass,
+    round: 0,
+    cleanUp: pass as () => void,
     controller: {
       run,
-      onAbort(cleanUp: () => any) {
-        my.cleanUp = cleanUp;
+      onAbort(cleanUp: () => void) {
+        my.cleanUp = () => {
+          cleanUp();
+          my.cleanUp = pass;
+        };
       },
       post(status: S) {
         dispatch({ tag: "pending", status });
@@ -145,7 +149,6 @@ export function useProgressOf<P extends any[], T, S>(
       });
     },
     start(...params: P) {
-      // TODO: prevent overlap here? in the effect block? both?
       dispatch({ tag: "started", params });
     },
     tearDown() {
@@ -161,19 +164,22 @@ export function useProgressOf<P extends any[], T, S>(
 
   useEffect(function onStart() {
     if (state.tag === "started") {
-      (async (params) => {
+      my.cleanUp();
+      my.aborted = false;
+      (async (round, params) => {
         try {
-          my.aborted = false;
           let payload = await my.controller.run(...params);
-          if (!my.aborted) {
+          if (round === my.round && !my.aborted) {
+            my.cleanUp = pass;
             dispatch({ tag: "resolved", payload });
           }
         } catch (reason) {
-          if (!my.aborted) {
+          if (round === my.round && !my.aborted) {
+            my.cleanUp = pass;
             dispatch({ tag: "rejected", reason, params });
           }
         }
-      })(state.params);
+      })(++my.round, state.params);
       return my.tearDown;
     }
   }, [my, state]);

@@ -5,7 +5,7 @@ import { bottom, pass, Sum } from "./support";
  * Async function wrapper that allows starting, aborting, retrying and
  * progress reporting.
  */
-export type Task<P extends any[], T, S> = {
+export type Task<P extends any[], S, T> = {
   /**
    * Starts the task.
    *
@@ -74,9 +74,9 @@ export type Progress<S> = {
   assertActive(): void;
 
   /**
-   * @param cleanUp Will be invoked when `abort()` is called while busy.
+   * @param callback Will be invoked when `abort()` is called while busy.
    */
-  onAbort(cleanUp: () => void): void;
+  onAbort(callback: () => void): void;
 
   /**
    * Sets the task's current status in the busy state.
@@ -106,9 +106,9 @@ export type Progress<S> = {
  * @see Task
  * @see Progress
  */
-export function useProgressOf<P extends any[], T, S>(
+export function useProgressOf<P extends any[], S, T>(
   run: (this: Progress<S>, ...params: P) => Promise<T>
-): Task<P, T, S> {
+): Task<P, S, T> {
   type State =
     | { tag: "idle" }
     | { tag: "started"; params: P }
@@ -121,7 +121,14 @@ export function useProgressOf<P extends any[], T, S>(
   const my = useRef({
     aborted: false,
     calls: 0,
-    cleanUp: pass as () => void,
+    cancellers: [] as (() => void)[],
+
+    cleanUp() {
+      for (let cancel of my.cancellers) {
+        cancel();
+      }
+      my.cancellers.length = 0;
+    },
 
     newContext() {
       const round = ++my.calls;
@@ -133,15 +140,11 @@ export function useProgressOf<P extends any[], T, S>(
         isActive,
         assertActive() {
           if (!isActive()) {
-            throw new Error("already aborted");
+            throw new Error("Task abandoned.");
           }
         },
-        onAbort(cleanUp: () => void) {
-          // TODO: maintain a list of cancel callbacks instead of just one?
-          my.cleanUp = () => {
-            cleanUp();
-            my.cleanUp = pass;
-          };
+        onAbort(callback: () => void) {
+          my.cancellers.push(callback);
         },
         post(status: S) {
           dispatch({ tag: "pending", status });
@@ -183,12 +186,12 @@ export function useProgressOf<P extends any[], T, S>(
         try {
           let payload = await context.run(...params);
           if (context.isActive()) {
-            my.cleanUp = pass;
+            my.cancellers.length = 0;
             dispatch({ tag: "resolved", payload });
           }
         } catch (reason) {
           if (context.isActive()) {
-            my.cleanUp = pass;
+            my.cancellers.length = 0;
             dispatch({ tag: "rejected", reason, params });
           }
         }
@@ -221,33 +224,30 @@ export function useProgressOf<P extends any[], T, S>(
 type Thread = { id: number; title: string };
 declare function getThreadIds(page: number): Promise<number[]>;
 declare function getThread(this: Progress<any>, id: number): Promise<Thread>;
-declare function timeout(ms: number): Promise<"timeout">;
-async function getThreads(
-  this: Progress<(Thread | false)[]>,
-  page: number
-): Promise<Thread[]> {
-  let ids = await getThreadIds(page);
-  let partial = ids.map<Thread | false>(_ => false);
-  let self = Object.assign({ getThread }, this);
-  self.post(partial);
-  let threads = Promise.all(ids.map(async (id, i) => {
-    self.assertActive();
-    let thread = await self.getThread(id);
-    partial[i] = thread;
-    self.post(partial);
-    return thread;
-  }));
-  let result = await Promise.race([timeout(10000), threads]);
-  if (result === "timeout") {
-    throw new Error("Timed out!");
-  }
-  return result;
-}
 
 function useImagination() {
-  const fetchPage = useProgressOf(getThreads);
-  fetchPage.when({
-    idle: () => fetchPage.start(0),
+  const getPage = useProgressOf(async function (
+    this: Progress<(Thread | false)[]>,
+    page: number
+  ): Promise<Thread[]> {
+    let ids = await getThreadIds(page);
+    let partial = ids.map<Thread | false>(() => false);
+    let self = Object.assign({ getThread }, this);
+    self.post(partial);
+    let threads = Promise.all(ids.map(async (id, i) => {
+      self.assertActive();
+      let thread = await self.getThread(id);
+      partial[i] = thread;
+      self.post(partial);
+      return thread;
+    }));
+    let timeout = new Promise<any>((_, reject) => {
+      setTimeout(() => reject("timeout"), 10000);
+    });
+    return Promise.race([timeout, threads]);
+  });
+  getPage.when({
+    idle: () => getPage.start(0),
     busy: (abort, partial) => {
       if (partial) {
         let count = partial.filter((t) => !!t).length;

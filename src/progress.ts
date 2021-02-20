@@ -55,7 +55,7 @@ export type Task<P extends any[], T, S> = {
      * @param retry Re-runs the producer with the same parameters.
      * Does nothing if the task was aborted by the consumer while busy.
      */
-    failed: [reason: any, retry: () => void]
+    failed: [reason: any, retry: () => void];
   }>
 }
 
@@ -113,7 +113,7 @@ export function useProgressOf<P extends any[], T, S>(
     | { tag: "started"; params: P }
     | { tag: "pending"; status: S }
     | { tag: "resolved"; payload: T }
-    | { tag: "rejected"; reason: any; params: P}
+    | { tag: "rejected"; reason: any; params: P }
     | { tag: "aborted" };
 
   const [state, dispatch] = useState<State>({ tag: "idle" });
@@ -121,23 +121,32 @@ export function useProgressOf<P extends any[], T, S>(
     aborted: false,
     round: 0,
     cleanUp: pass as () => void,
-    controller: {
-      run,
-      onAbort(cleanUp: () => void) {
-        my.cleanUp = () => {
-          cleanUp();
-          my.cleanUp = pass;
-        };
-      },
-      post(status: S) {
-        dispatch({ tag: "pending", status });
-      },
-      returnWhenAborted() {
-        if (my.aborted) {
-          throw new Error("already aborted");
-        }
+
+    controller() {
+      const round = ++my.round;
+      function isAbandoned() {
+        return round !== my.round || my.aborted;
       }
+      return {
+        run,
+        isAbandoned,
+        onAbort(cleanUp: () => void) {
+          my.cleanUp = () => {
+            cleanUp();
+            my.cleanUp = pass;
+          };
+        },
+        post(status: S) {
+          dispatch({ tag: "pending", status });
+        },
+        returnWhenAborted() {
+          if (isAbandoned()) {
+            throw new Error("already aborted");
+          }
+        }
+      };
     },
+
     abort() {
       dispatch((prev) => {
         if (!my.aborted) {
@@ -148,11 +157,13 @@ export function useProgressOf<P extends any[], T, S>(
         return prev;
       });
     },
+
     start(...params: P) {
       dispatch({ tag: "started", params });
     },
+
     tearDown() {
-      dispatch(() => {
+      dispatch((state) => {
         if (state.tag === "started") {
           my.cleanUp();
           my.aborted = true;
@@ -166,20 +177,20 @@ export function useProgressOf<P extends any[], T, S>(
     if (state.tag === "started") {
       my.cleanUp();
       my.aborted = false;
-      (async (round, params) => {
+      (async (context, params) => {
         try {
-          let payload = await my.controller.run(...params);
-          if (round === my.round && !my.aborted) {
+          let payload = await context.run(...params);
+          if (!context.isAbandoned()) {
             my.cleanUp = pass;
             dispatch({ tag: "resolved", payload });
           }
         } catch (reason) {
-          if (round === my.round && !my.aborted) {
+          if (!context.isAbandoned()) {
             my.cleanUp = pass;
             dispatch({ tag: "rejected", reason, params });
           }
         }
-      })(++my.round, state.params);
+      })(my.controller(), state.params);
       return my.tearDown;
     }
   }, [my, state]);

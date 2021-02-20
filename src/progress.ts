@@ -65,6 +65,15 @@ export type Task<P extends any[], T, S> = {
  */
 export type Progress<S> = {
   /**
+   * Halts if the task has been abandoned.
+   *
+   * A task is abandoned when the consumer calls `abort()` or
+   * `Task.start(...P)` during the busy state. Call this once in a while
+   * to prevent doing unnecessary work that the consumer will never see.
+   */
+  assertActive(): void;
+
+  /**
    * @param cleanUp Will be invoked when `abort()` is called while busy.
    */
   onAbort(cleanUp: () => void): void;
@@ -76,14 +85,6 @@ export type Progress<S> = {
    * Causes a re-render even if the value is the same as the previous one.
    */
   post(status: S): void;
-
-  /**
-   * Halts the task if the consumer has called `abort()` during the busy state.
-   *
-   * Call this once in a while to prevent doing unnecessary work that the
-   * consumer will never see.
-   */
-  returnWhenAborted(): void;
 }
 
 /**
@@ -119,18 +120,24 @@ export function useProgressOf<P extends any[], T, S>(
   const [state, dispatch] = useState<State>({ tag: "idle" });
   const my = useRef({
     aborted: false,
-    round: 0,
+    calls: 0,
     cleanUp: pass as () => void,
 
-    controller() {
-      const round = ++my.round;
-      function isAbandoned() {
-        return round !== my.round || my.aborted;
+    newContext() {
+      const round = ++my.calls;
+      function isActive() {
+        return round === my.calls && !my.aborted;
       }
       return {
         run,
-        isAbandoned,
+        isActive,
+        assertActive() {
+          if (!isActive()) {
+            throw new Error("already aborted");
+          }
+        },
         onAbort(cleanUp: () => void) {
+          // TODO: maintain a list of cancel callbacks instead of just one?
           my.cleanUp = () => {
             cleanUp();
             my.cleanUp = pass;
@@ -138,11 +145,6 @@ export function useProgressOf<P extends any[], T, S>(
         },
         post(status: S) {
           dispatch({ tag: "pending", status });
-        },
-        returnWhenAborted() {
-          if (isAbandoned()) {
-            throw new Error("already aborted");
-          }
         }
       };
     },
@@ -180,17 +182,17 @@ export function useProgressOf<P extends any[], T, S>(
       (async (context, params) => {
         try {
           let payload = await context.run(...params);
-          if (!context.isAbandoned()) {
+          if (context.isActive()) {
             my.cleanUp = pass;
             dispatch({ tag: "resolved", payload });
           }
         } catch (reason) {
-          if (!context.isAbandoned()) {
+          if (context.isActive()) {
             my.cleanUp = pass;
             dispatch({ tag: "rejected", reason, params });
           }
         }
-      })(my.controller(), state.params);
+      })(my.newContext(), state.params);
       return my.tearDown;
     }
   }, [my, state]);
@@ -216,22 +218,44 @@ export function useProgressOf<P extends any[], T, S>(
   }), [my, state]);
 }
 
+type Thread = { id: number; title: string };
+declare function getThreadIds(page: number): Promise<number[]>;
+declare function getThread(this: Progress<any>, id: number): Promise<Thread>;
+declare function timeout(ms: number): Promise<"timeout">;
+async function getThreads(
+  this: Progress<(Thread | false)[]>,
+  page: number
+): Promise<Thread[]> {
+  let ids = await getThreadIds(page);
+  let partial = ids.map<Thread | false>(_ => false);
+  let self = Object.assign({ getThread }, this);
+  self.post(partial);
+  let threads = Promise.all(ids.map(async (id, i) => {
+    self.assertActive();
+    let thread = await self.getThread(id);
+    partial[i] = thread;
+    self.post(partial);
+    return thread;
+  }));
+  let result = await Promise.race([timeout(10000), threads]);
+  if (result === "timeout") {
+    throw new Error("Timed out!");
+  }
+  return result;
+}
+
 function useImagination() {
-  const count = useProgressOf(async function (this: Progress<boolean>, n: number) {
-    let handle = -1;
-    this.onAbort(() => handle !== -1 && clearTimeout(handle));
-    for (let i = 1; i <= n; i++) {
-      this.returnWhenAborted();
-      this.post(i % 5 === 0);
-      await new Promise(ok => handle = setTimeout(ok, 1000));
-    }
-    return "foo";
-  });
-  count.when({
-    idle: () => count.start(10),
-    busy: (abort, status) => {
-      if (status) abort();
+  const fetchPage = useProgressOf(getThreads);
+  fetchPage.when({
+    idle: () => fetchPage.start(0),
+    busy: (abort, partial) => {
+      if (partial) {
+        let count = partial.filter((t) => !!t).length;
+        let total = partial.length;
+        console.info(`${count / total * 100 | 0}% done [${count} / ${total}]`);
+      }
     },
-    otherwise: console.log,
+    done: console.log,
+    failed: console.error,
   });
 }

@@ -5,7 +5,7 @@ import { bottom, pass, Sum } from "./support";
  * Async function wrapper that allows starting, aborting, retrying and
  * progress reporting.
  */
-export type Task<P extends any[], S, T> = {
+export type Task<S, P extends any[], T> = {
   /**
    * Starts the task.
    *
@@ -119,9 +119,9 @@ export type Progress<S> = {
  * @see Task
  * @see Progress
  */
-export function useProgressOf<P extends any[], S, T>(
+export function useProgressOf<S, P extends any[], T>(
   run: (this: Progress<S>, ...params: P) => Promise<T>
-): Task<P, S, T> {
+): Task<S, P, T> {
   type State =
     | { tag: "idle" }
     | { tag: "started"; params: P }

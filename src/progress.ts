@@ -74,6 +74,12 @@ export type Progress<S> = {
   assertActive(): void;
 
   /**
+   * @param more Must be a non-empty object literal.
+   * @returns The same object with a copy of this object's properties.
+   */
+  augment<A>(more: A): A & Progress<S>;
+
+  /**
    * @param callback Will be invoked when `abort()` is called while busy.
    */
   onAbort(callback: () => void): void;
@@ -142,6 +148,9 @@ export function useProgressOf<P extends any[], S, T>(
           if (!isActive()) {
             throw new Error("Task abandoned.");
           }
+        },
+        augment(more: any) {
+          return Object.assign(more, this);
         },
         onAbort(callback: () => void) {
           my.cancellers.push(callback);
@@ -232,7 +241,7 @@ function useImagination() {
   ): Promise<Thread[]> {
     let ids = await getThreadIds(page);
     let partial = ids.map<Thread | false>(() => false);
-    let self = Object.assign({ getThread }, this);
+    let self = this.augment({ getThread });
     self.post(partial);
     let threads = Promise.all(ids.map(async (id, i) => {
       self.assertActive();

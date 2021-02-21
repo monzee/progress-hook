@@ -74,6 +74,19 @@ export type Progress<S> = {
   assertActive(): void;
 
   /**
+   * @param aux Must be a non-empty object literal.
+   * @returns The same object with a copy of this context's properties.
+   *
+   * This is for composing auxiliary producers that require a `Progress`
+   * context. The resulting object has a `post` function that takes `any`
+   * and does nothing, making it usable by any producer. All status
+   * objects posted by the auxiliary producer are dropped and never seen
+   * by the consumer, but the cancellation facilities work as usual and
+   * are tied to the enclosing producer's status.
+   */
+  extend<A>(aux: A): A & Progress<any>;
+
+  /**
    * @param callback Will be invoked when `abort()` is called while busy.
    */
   onAbort(callback: () => void): void;
@@ -85,19 +98,6 @@ export type Progress<S> = {
    * Causes a re-render even if the value is the same as the previous one.
    */
   post(status: S): void;
-
-  /**
-   * @param aux Must be a non-empty object literal.
-   * @returns The same object with a copy of this context's properties.
-   *
-   * This is for composing auxiliary producers that require a `Progress`
-   * context. The resulting object has a `post` function that takes `any`
-   * and does nothing, making it usable by any producer. All status
-   * objects posted by the auxiliary producer are dropped and never seen
-   * by the consumer, but the cancellation facilities work as usual and
-   * are tied to the enclosing producer's status.
-   */
-  subContext<A>(aux: A): A & Progress<any>;
 }
 
 /**
@@ -156,14 +156,14 @@ export function useProgressOf<P extends any[], S, T>(
             throw new Error("Task abandoned.");
           }
         },
+        extend(sub: any) {
+          return Object.assign(sub, this, { post: pass });
+        },
         onAbort(callback: () => void) {
           my.cancellers.push(callback);
         },
         post(status: S) {
           dispatch({ tag: "pending", status });
-        },
-        subContext(more: any) {
-          return Object.assign(more, this, { post: pass });
         }
       };
     },
@@ -248,7 +248,7 @@ function useImagination() {
   ): Promise<Thread[]> {
     let ids = await getThreadIds(page);
     let partial = ids.map<Thread | false>(() => false);
-    let sub = this.subContext({ getThread });
+    let sub = this.extend({ getThread });
     this.post(partial);
     let threads = Promise.all(ids.map(async (id, i) => {
       this.assertActive();

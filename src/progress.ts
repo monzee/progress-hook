@@ -74,10 +74,39 @@ export type Progress<S> = {
   assertActive(): void;
 
   /**
-   * @param more Must be a non-empty object literal.
+   * @param aux Must be a non-empty object literal.
    * @returns The same object with a copy of this object's properties.
+   *
+   * This is for composing auxiliary producers that require a `Progress`
+   * context. We call the caller of this method the "enclosing producer"
+   * or "enclosure" hereon (technically a consumer of auxiliary producers).
+   * The status type parameters (`S`) of the enclosing and auxiliary
+   * producers must be compatible:
+   *
+   * - If the auxiliary producer never calls `Progress.post(S)` (i.e. it
+   * only uses the cancellation facilities), its signature must have
+   * `this: Progress<never>` as its first argument which makes it compatible
+   * with any enclosing producer. 
+   *
+   * - If it does, the type parameter `S` of the auxiliary must be a
+   * subtype of the type parameter `S` of the enclosure. If they have
+   * no such relation, the `S` of the enclosure must be changed into the
+   * union of the two. E.g. if the enclosing producer with
+   * `this: Progress<number>` needs to call another producer that has
+   * `this: Progress<string>`, the signature of the enclosing must be
+   * changed to `this: Progress<number | string>`. This must be done for
+   * every auxiliary producer. The consumers of the enclosing producer
+   * might have to be fixed to accomodate this change.
+   *
+   * - If the auxiliary producer never calls any `Progress` methods, it
+   * doesn't need to have a `this` parameter in its signature and can
+   * be called straight by the enclosure without using this method.
+   *
+   * - When the types get too messy, use `this: Progress<any>` in the
+   * enclosure. You lose type checking, so be careful when writing
+   * consumers.
    */
-  augment<A>(more: A): A & Progress<S>;
+  augment<A>(aux: A): A & Progress<S>;
 
   /**
    * @param callback Will be invoked when `abort()` is called while busy.
@@ -232,7 +261,7 @@ export function useProgressOf<P extends any[], S, T>(
 
 type Thread = { id: number; title: string };
 declare function getThreadIds(page: number): Promise<number[]>;
-declare function getThread(this: Progress<any>, id: number): Promise<Thread>;
+declare function getThread(this: Progress<never>, id: number): Promise<Thread>;
 
 function useImagination() {
   const getPage = useProgressOf(async function (
@@ -250,11 +279,12 @@ function useImagination() {
       self.post(partial);
       return thread;
     }));
-    let timeout = new Promise<any>((_, reject) => {
+    let deadline = new Promise<any>((_, reject) => {
       setTimeout(() => reject("timeout"), 10000);
     });
-    return Promise.race([timeout, threads]);
+    return Promise.race([deadline, threads]);
   });
+
   getPage.when({
     idle: () => getPage.start(0),
     busy: (abort, partial) => {

@@ -74,15 +74,15 @@ export type Progress<S> = {
   assertActive(): void;
 
   /**
-   * @param aux Must be an object literal containing functions.
+   * @param aux Must be an object literal with at least one method.
    * @returns The same object with a copy of this context's properties.
    *
-   * This is for composing auxiliary producers that require a `Progress`
+   * This is for composing subproducers that require a `Progress`
    * context. The resulting object has a `post` function that takes `any`
-   * and does nothing, making it usable by any producer. All status
-   * objects posted by the auxiliary producer are dropped and never seen
+   * and does nothing, making it usable by any subproducer. All status
+   * objects posted by the subproducers are dropped and never seen
    * by the consumer, but the cancellation facilities work as usual and
-   * are tied to the enclosing producer's status.
+   * are tied to the status of this task.
    */
   extend<A extends object>(aux: Exclude<A, Function|any[]>): A & Progress<any>;
 
@@ -92,7 +92,8 @@ export type Progress<S> = {
   onAbort(callback: () => void): void;
 
   /**
-   * Sets the task's current status in the busy state.
+   * Sets the task's current status in the busy state if the task hasn't
+   * been abandoned yet.
    *
    * @param status The value to be sent to the consumer's `busy` branch.
    * Causes a re-render even if the value is the same as the previous one.
@@ -113,7 +114,7 @@ export type Progress<S> = {
  *
  * @returns A non-stable task object.
  *
- * The object changes everytime its internal state changes (in sync with the
+ * This object changes everytime its internal state changes (in sync with the
  * {@link Task.when} function), but its {@link Task.start} function is stable.
  *
  * @see Task
@@ -131,49 +132,61 @@ export function useProgressOf<S, P extends any[], T>(
     | { tag: "aborted" };
 
   const [state, dispatch] = useState<State>({ tag: "idle" });
-  const my = useRef({
+  const My = useRef({
     aborted: false,
     calls: 0,
     cancellers: [] as (() => void)[],
 
     cleanUp() {
-      for (let cancel of my.cancellers) {
+      for (let cancel of My.cancellers) {
         cancel();
       }
-      my.cancellers.length = 0;
+      My.cancellers.length = 0;
     },
 
-    newContext() {
-      const round = ++my.calls;
-      const self = {
+    async run(params: P) {
+      const round = ++My.calls;
+      const job = {
         run,
         isActive() {
-          return round === my.calls && !my.aborted;
+          return round === My.calls && !My.aborted;
         },
         assertActive() {
-          if (!self.isActive()) {
+          if (!job.isActive()) {
             throw new Error("Task abandoned.");
           }
         },
         extend(sub: any) {
-          return Object.assign(sub, this, { post: self.assertActive });
+          return Object.assign(sub, job, { post: job.assertActive });
         },
         onAbort(callback: () => void) {
-          my.cancellers.push(callback);
+          My.cancellers.push(callback);
         },
         post(status: S) {
-          self.assertActive();
+          job.assertActive();
           dispatch({ tag: "pending", status });
         }
       };
-      return self;
+
+      try {
+        let payload = await job.run(...params);
+        if (job.isActive()) {
+          My.cancellers.length = 0;
+          dispatch({ tag: "resolved", payload });
+        }
+      } catch (reason) {
+        if (job.isActive()) {
+          My.cancellers.length = 0;
+          dispatch({ tag: "rejected", reason, params });
+        }
+      }
     },
 
     abort() {
       dispatch((prev) => {
-        if (!my.aborted) {
-          my.cleanUp();
-          my.aborted = true;
+        if (!My.aborted) {
+          My.cleanUp();
+          My.aborted = true;
           return { tag: "aborted" };
         }
         return prev;
@@ -187,8 +200,8 @@ export function useProgressOf<S, P extends any[], T>(
     tearDown() {
       dispatch((state) => {
         if (state.tag === "started") {
-          my.cleanUp();
-          my.aborted = true;
+          My.cleanUp();
+          My.aborted = true;
         }
         return state;
       });
@@ -197,50 +210,37 @@ export function useProgressOf<S, P extends any[], T>(
 
   useEffect(function onStart() {
     if (state.tag === "started") {
-      my.cleanUp();
-      my.aborted = false;
-      (async (context, params) => {
-        try {
-          let payload = await context.run(...params);
-          if (context.isActive()) {
-            my.cancellers.length = 0;
-            dispatch({ tag: "resolved", payload });
-          }
-        } catch (reason) {
-          if (context.isActive()) {
-            my.cancellers.length = 0;
-            dispatch({ tag: "rejected", reason, params });
-          }
-        }
-      })(my.newContext(), state.params);
-      return my.tearDown;
+      My.cleanUp();
+      My.aborted = false;
+      My.run(state.params);
+      return My.tearDown;
     }
-  }, [my, state]);
+  }, [My, state]);
 
   return useMemo(() => ({
-    start: my.start,
+    start: My.start,
     when({ otherwise: _ = bottom, idle = _, busy = _, done = _, failed = _ }) {
       switch (state.tag) {
         case "idle":
           return idle();
         case "started":
-          return busy(my.abort);
+          return busy(My.abort);
         case "pending":
-          return busy(my.abort, state.status);
+          return busy(My.abort, state.status);
         case "resolved":
           return done(state.payload);
         case "rejected":
-          return failed(state.reason, () => my.start(...state.params));
+          return failed(state.reason, () => My.start(...state.params));
         case "aborted":
           return failed("aborted", pass);
       }
     }
-  }), [my, state]);
+  }), [My, state]);
 }
 
 type Thread = { id: number; title: string };
 declare function getThreadIds(page: number): Promise<number[]>;
-declare function getThread(this: Progress<number>, id: number): Promise<Thread>;
+declare function getThread(this: Progress<never>, id: number): Promise<Thread>;
 
 function useImagination() {
   const getPage = useProgressOf(async function (

@@ -84,7 +84,7 @@ export type Progress<S> = {
    * by the consumer, but the cancellation facilities work as usual and
    * are tied to the enclosing producer's status.
    */
-  extend<A extends object>(aux: A): A & Progress<any>;
+  extend<A extends object>(aux: Exclude<A, Function|any[]>): A & Progress<any>;
 
   /**
    * @param callback Will be invoked when `abort()` is called while busy.

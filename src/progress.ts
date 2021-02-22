@@ -156,7 +156,7 @@ export function useProgressOf<S, P extends any[], T>(
           }
         },
         extend(sub: any) {
-          return Object.assign(sub, this, { post: pass });
+          return Object.assign(sub, this, { post: self.assertActive });
         },
         onAbort(callback: () => void) {
           my.cancellers.push(callback);

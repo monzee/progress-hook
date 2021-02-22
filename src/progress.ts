@@ -74,7 +74,7 @@ export type Progress<S> = {
   assertActive(): void;
 
   /**
-   * @param aux Must be a non-empty object literal.
+   * @param aux Must be an object literal containing functions.
    * @returns The same object with a copy of this context's properties.
    *
    * This is for composing auxiliary producers that require a `Progress`
@@ -145,14 +145,13 @@ export function useProgressOf<S, P extends any[], T>(
 
     newContext() {
       const round = ++my.calls;
-      function isActive() {
-        return round === my.calls && !my.aborted;
-      }
-      return {
+      const self = {
         run,
-        isActive,
+        isActive() {
+          return round === my.calls && !my.aborted;
+        },
         assertActive() {
-          if (!isActive()) {
+          if (!self.isActive()) {
             throw new Error("Task abandoned.");
           }
         },
@@ -163,11 +162,11 @@ export function useProgressOf<S, P extends any[], T>(
           my.cancellers.push(callback);
         },
         post(status: S) {
-          if (isActive()) {
-            dispatch({ tag: "pending", status });
-          }
+          self.assertActive();
+          dispatch({ tag: "pending", status });
         }
       };
+      return self;
     },
 
     abort() {
@@ -260,7 +259,7 @@ function useImagination() {
       return thread;
     }));
     let deadline = new Promise<any>((_, reject) => {
-      setTimeout(() => reject("timeout"), 10000);
+      setTimeout(() => reject("timeout"), 10_000);
     });
     return Promise.race([deadline, threads]);
   });
@@ -275,6 +274,6 @@ function useImagination() {
       }
     },
     done: console.log,
-    failed: console.error,
+    failed: console.error
   });
 }

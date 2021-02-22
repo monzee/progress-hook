@@ -84,7 +84,7 @@ export type Progress<S> = {
    * by the consumer, but the cancellation facilities work as usual and
    * are tied to the enclosing producer's status.
    */
-  extend<A>(aux: A): A & Progress<any>;
+  extend<A extends object>(aux: A): A & Progress<any>;
 
   /**
    * @param callback Will be invoked when `abort()` is called while busy.
@@ -163,7 +163,9 @@ export function useProgressOf<S, P extends any[], T>(
           my.cancellers.push(callback);
         },
         post(status: S) {
-          dispatch({ tag: "pending", status });
+          if (isActive()) {
+            dispatch({ tag: "pending", status });
+          }
         }
       };
     },

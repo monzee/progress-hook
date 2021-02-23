@@ -28,3 +28,17 @@ export function randomInt(
     return Math.floor(random * (ceil - bound) + bound);
   }
 }
+
+export function delay(duration: number): Promise<void> {
+  return new Promise((ok) => setTimeout(ok, duration));
+}
+
+export function withTimeout<P>(
+  maxDuration: number,
+  promise: Promise<P>
+): Promise<P> {
+  let deadline = new Promise<never>((_, err) => {
+    setTimeout(() => err("timeout"), maxDuration);
+  });
+  return Promise.race([deadline, promise]);
+}

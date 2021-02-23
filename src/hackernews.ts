@@ -1,5 +1,6 @@
 import axios from "axios";
 import { Progress } from "./progress";
+import { delay, withTimeout } from "./support";
 
 // https://github.com/HackerNews/API/blob/master/README.md
 
@@ -65,7 +66,7 @@ export type User = {
   submitted: number[];
 };
 
-export async function getItem(
+async function fetchItem(
   this: Progress<[got: number, total: number]>,
   id: number
 ): Promise<Node> {
@@ -78,29 +79,25 @@ export async function getItem(
   return response.data;
 }
 
-export async function topStories(this: Progress<never>): Promise<number[]> {
-  let response = await api.get("topstories.json", {
+type Listing = "top" | "best" | "new";
+
+async function fetchListing(
+  this: Progress<never>,
+  which: Listing = "top"
+): Promise<number[]> {
+  let response = await api.get(`${which}stories.json`, {
     cancelToken: new axios.CancelToken(this.onAbort)
   });
   return response.data;
 }
 
-function withTimeout<P>(maxDuration: number, promise: Promise<P>): Promise<P> {
-  let deadline = new Promise<P>((_, err) => {
-    setTimeout(() => err("timeout"), maxDuration);
-  });
-  return Promise.race([deadline, promise]);
-}
+const cache: { [_ in Listing]: number[] } = {
+  top: [],
+  best: [],
+  new: []
+};
 
-function delay(duration: number): Promise<void> {
-  return new Promise((ok) => setTimeout(ok, duration));
-}
-
-type Listing = "top" | "best" | "new";
-
-var top: number[] = [];
-
-export async function getListing(
+export async function fetchPage(
   this: Progress<(number | Root)[]>,
   page = 0,
   {
@@ -110,27 +107,31 @@ export async function getListing(
     which = "top" as Listing
   } = {}
 ): Promise<Root[]> {
-  const sub = this.extend({ topStories, getItem });
-  if (forced || !top.length) {
-    top = await sub.topStories();
+  const sub = this.extend({ fetchListing, fetchItem });
+  const cached = cache[which];
+  if (forced || !cached.length) {
+    cached.splice(0, cached.length, ...(await sub.fetchListing(which)));
   }
   let start = page * pageSize;
-  if (start >= top.length) {
+  if (start >= cached.length) {
     return [];
   }
-  let pageIds = top.slice(start, start + pageSize);
-  const partial = pageIds.map<number | Root>(() => 0);
-  const lastIndex = partial.length - 1;
+  let itemIds = cached.slice(start, start + pageSize);
+  let remaining = itemIds.length;
+  const partial = itemIds.map<number | Root>(() => 0);
+  const lastIndex = remaining - 1;
   this.post(partial);
-  let requests = pageIds.reverse().map(async (id, i) => {
-    let item = (await sub.getItem(id)) as Root;
+  let requests = itemIds.map(async (id, i) => {
     if (slowly) {
-      await delay(1000);
+      await delay(250 * (lastIndex - i));
+      this.assertActive();
     }
-    partial[lastIndex - i] = item;
-    this.post(partial);
+    let item = (await sub.fetchItem(id)) as Root;
+    if (--remaining) {
+      partial[i] = item;
+      this.post(partial);
+    }
     return item;
   });
-  let roots = await withTimeout(10_000, Promise.all(requests));
-  return roots.reverse();
+  return withTimeout(10_000, Promise.all(requests));
 }

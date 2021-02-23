@@ -1,6 +1,7 @@
 .App {
   font-family: sans-serif;
   text-align: center;
+  padding: 12px 24px;
 }
 .listing {
   text-align: left;
@@ -9,7 +10,6 @@
   text-align: right;
   padding-right: 24px;
   padding-top: 18px;
-  vertical-align: middle;
 }
 .ad {
   padding-left: 24px;

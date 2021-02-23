@@ -2,3 +2,12 @@
   font-family: sans-serif;
   text-align: center;
 }
+.listing {
+  text-align: left;
+}
+.meta {
+  text-align: right;
+  padding-right: 24px;
+  padding-top: 18px;
+  vertical-align: middle;
+}

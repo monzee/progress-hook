@@ -156,7 +156,7 @@ export function useProgressOf<S, P extends any[], T>(
             throw new Error("Task abandoned.");
           }
         },
-        extend(sub: any) {
+        extend<A>(sub: A): A & Progress<void> {
           return Object.assign(sub, job, { post: job.assertActive });
         },
         onAbort(callback: () => void) {
@@ -236,44 +236,4 @@ export function useProgressOf<S, P extends any[], T>(
       }
     }
   }), [My, state]);
-}
-
-type Thread = { id: number; title: string };
-declare function getThreadIds(page: number): Promise<number[]>;
-declare function getThread(this: Progress<never>, id: number): Promise<Thread>;
-
-function useImagination() {
-  const getPage = useProgressOf(async function (
-    this: Progress<(Thread | false)[]>,
-    page: number
-  ): Promise<Thread[]> {
-    let ids = await getThreadIds(page);
-    let partial = ids.map<Thread | false>(() => false);
-    let sub = this.extend({ getThread });
-    this.post(partial);
-    let threads = Promise.all(ids.map(async (id, i) => {
-      this.assertActive();
-      let thread = await sub.getThread(id);
-      partial[i] = thread;
-      this.post(partial);
-      return thread;
-    }));
-    let deadline = new Promise<any>((_, reject) => {
-      setTimeout(() => reject("timeout"), 10_000);
-    });
-    return Promise.race([deadline, threads]);
-  });
-
-  getPage.when({
-    idle: () => getPage.start(0),
-    busy: (_, partial) => {
-      if (partial) {
-        let count = partial.filter((t) => !!t).length;
-        let total = partial.length;
-        console.info(`${count / total * 100 | 0}% done [${count} / ${total}]`);
-      }
-    },
-    done: console.log,
-    failed: console.error
-  });
 }

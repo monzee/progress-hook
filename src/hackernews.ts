@@ -5,7 +5,7 @@ import { Progress } from "./progress";
 
 const api = axios.create({ baseURL: "https://hacker-news.firebaseio.com/v0/" });
 
-export type Item = {
+type Item = {
   id: number;
   by: string;
   time: number;
@@ -22,19 +22,19 @@ export type Story = Item & {
   score: number;
 };
 
-export type Comment = Item & {
-  type: "comment";
-  parent: number;
-  text: string;
-  kids: number[];
-};
-
 export type Job = Item & {
   type: "job";
   title: string;
   text: string;
   url: string;
   score: number;
+};
+
+export type Comment = Item & {
+  type: "comment";
+  parent: number;
+  text: string;
+  kids: number[];
 };
 
 export type Poll = Item & {
@@ -54,7 +54,8 @@ export type PollPart = Item & {
   score: number;
 };
 
-export type Post = Story | Comment | Job | Poll | PollPart;
+export type Root = Story | Job;
+export type Node = Root | Comment | Poll | PollPart;
 
 export type User = {
   id: string;
@@ -65,9 +66,9 @@ export type User = {
 };
 
 export async function getItem(
-  this: Progress<[number, number]>,
+  this: Progress<[got: number, total: number]>,
   id: number
-): Promise<Post> {
+): Promise<Node> {
   let response = await api.get(`item/${id}.json`, {
     cancelToken: new axios.CancelToken(this.onAbort),
     onDownloadProgress: (event: ProgressEvent) => {
@@ -84,20 +85,31 @@ export async function topStories(this: Progress<never>): Promise<number[]> {
   return response.data;
 }
 
-function withTimeout<P>(duration: number, promise: Promise<P>): Promise<P> {
+function withTimeout<P>(maxDuration: number, promise: Promise<P>): Promise<P> {
   let deadline = new Promise<P>((_, err) => {
-    setTimeout(() => err("timeout"), duration);
+    setTimeout(() => err("timeout"), maxDuration);
   });
   return Promise.race([deadline, promise]);
 }
 
+function delay(duration: number): Promise<void> {
+  return new Promise((ok) => setTimeout(ok, duration));
+}
+
+type Listing = "top" | "best" | "new";
+
 var top: number[] = [];
 
-export async function getPage(
-  this: Progress<(number | Story | Job)[]>,
-  page: number,
-  { pageSize = 25, forced = false } = {}
-): Promise<(Story | Job)[]> {
+export async function getListing(
+  this: Progress<(number | Root)[]>,
+  page = 0,
+  {
+    pageSize = 25,
+    forced = false,
+    slowly = false,
+    which = "top" as Listing
+  } = {}
+): Promise<Root[]> {
   const sub = this.extend({ topStories, getItem });
   if (forced || !top.length) {
     top = await sub.topStories();
@@ -107,13 +119,18 @@ export async function getPage(
     return [];
   }
   let pageIds = top.slice(start, start + pageSize);
-  const partial = pageIds.map<number | Story | Job>(() => 0);
+  const partial = pageIds.map<number | Root>(() => 0);
+  const lastIndex = partial.length - 1;
   this.post(partial);
-  let requests = pageIds.map(async (id, i) => {
-    let item = (await sub.getItem(id)) as Story | Job;
-    partial[i] = item;
+  let requests = pageIds.reverse().map(async (id, i) => {
+    let item = (await sub.getItem(id)) as Root;
+    if (slowly) {
+      await delay(1000);
+    }
+    partial[lastIndex - i] = item;
     this.post(partial);
     return item;
   });
-  return withTimeout(10_000, Promise.all(requests));
+  let roots = await withTimeout(10_000, Promise.all(requests));
+  return roots.reverse();
 }

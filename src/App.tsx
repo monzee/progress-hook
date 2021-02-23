@@ -1,6 +1,5 @@
-import { useMemo } from "react";
 import { Log } from "./components";
-import { getPage, Job, Story } from "./hackernews";
+import { getListing, Root } from "./hackernews";
 import { useProgressOf } from "./progress";
 import "./styles.css";
 
@@ -19,21 +18,20 @@ function NothingToShow() {
   );
 }
 
-function Row(props: { item: Story | Job }) {
-  const { item } = props;
+function Row({ item }: { item: Root }) {
   return (
     <tr>
-      <td className="meta">
-        <big>{item.score}</big>
-        {item.type === "story" && (
+      {item.type === "story" && (
+        <td className="meta">
+          <big>{item.score}</big>
           <p>
-            <a href="javascript:void 0">
+            <a href="#">
               <small>{item.descendants} comment(s)</small>
             </a>
           </p>
-        )}
-      </td>
-      <td>
+        </td>
+      )}
+      <td {...(item.type === "job" ? { colSpan: 2, className: "ad" } : {})}>
         <h4>{item.title}</h4>
         <p>submitted by {item.by}</p>
       </td>
@@ -42,14 +40,13 @@ function Row(props: { item: Story | Job }) {
 }
 
 export default function App() {
-  const { start, when } = useProgressOf(getPage);
-  const header = useMemo(NothingToShow, []);
+  const { start, when } = useProgressOf(getListing);
   return (
     <div className="App">
       {when({
         idle: () => {
-          start(0);
-          return header;
+          start();
+          return NothingToShow();
         },
 
         busy: (abort, partial) =>
@@ -74,7 +71,7 @@ export default function App() {
               </tbody>
             </table>
           ) : (
-            header
+            <NothingToShow />
           ),
 
         done: (result) => (
@@ -84,7 +81,9 @@ export default function App() {
                 <tr>
                   <td colSpan={2}>
                     <h1>Hacker News</h1>
-                    <button onClick={() => start(0, { forced: true })}>
+                    <button
+                      onClick={() => start(0, { forced: true, slowly: true })}
+                    >
                       refresh
                     </button>
                   </td>
@@ -101,6 +100,7 @@ export default function App() {
           <Log message={reason} severity="error">
             <h1>ERROR!</h1>
             <p>please see console</p>
+            <button onClick={() => start()}>start over</button>
           </Log>
         )
       })}

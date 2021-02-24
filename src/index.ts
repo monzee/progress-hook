@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { bottom, pass, Sum } from "./support";
-
 /**
  * Async function wrapper that allows starting, aborting, retrying and
  * progress reporting.

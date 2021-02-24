@@ -1,30 +1,41 @@
 {
-  "name": "useprogressof-hook",
+  "name": "react-progress-hook",
   "version": "1.0.0",
-  "description": "Prototype of a promise wrapper with cancel, retry and progress updates",
-  "keywords": [],
-  "main": "src/index.tsx",
-  "dependencies": {
-    "axios": "0.21.1",
-    "react": "17.0.1",
-    "react-dom": "17.0.1",
-    "react-scripts": "4.0.2"
-  },
-  "devDependencies": {
-    "@types/react": "17.0.0",
-    "@types/react-dom": "17.0.0",
-    "typescript": "4.1.3"
+  "description": "Promise wrapper that adds cancellation, retry and progress updates",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./support": "./dist/support.js"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test --env=jsdom",
-    "eject": "react-scripts eject"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "browserslist": [
-    ">0.2%",
-    "not dead",
-    "not ie <= 11",
-    "not op_mini all"
-  ]
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monzee/progress-hook.git"
+  },
+  "keywords": [
+    "react",
+    "typescript",
+    "hook",
+    "promise",
+    "cancel",
+    "retry",
+    "progress"
+  ],
+  "author": "Mon Zafra",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/monzee/progress-hook/issues"
+  },
+  "homepage": "https://github.com/monzee/progress-hook#readme",
+  "devDependencies": {
+    "@types/react": "^17.0.2",
+    "@types/react-dom": "^17.0.1",
+    "typescript": "^4.2.2"
+  },
+  "peerDependencies": {
+    "react": "^17.0.1"
+  }
 }

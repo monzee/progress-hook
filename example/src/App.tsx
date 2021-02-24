@@ -1,8 +1,8 @@
 import { ReactNode } from "react";
 import { Log } from "./components";
 import { fetchPage, Root } from "./hackernews";
-import { useProgressOf } from "./progress";
-import "./styles.css";
+import { useProgressOf } from "react-progress-hook";
+import "./App.css";
 
 function Listing({
   action,
@@ -37,6 +37,7 @@ function Row({ item }: { item: Root }) {
         <td className="meta">
           <big>{item.score}</big>
           <p>
+            {/* eslint-disable-next-line */}
             <a href="#">
               <small>{item.descendants} comment(s)</small>
             </a>

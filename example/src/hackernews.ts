@@ -1,6 +1,6 @@
 import axios from "axios";
-import { Progress } from "./progress";
-import { delay, withTimeout } from "./support";
+import { Progress } from "react-progress-hook";
+import { delay, withTimeout } from "react-progress-hook/dist/support";
 
 // https://github.com/HackerNews/API/blob/master/README.md
 

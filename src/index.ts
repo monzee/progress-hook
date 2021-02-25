@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { bottom, pass, Sum } from "./support";
+import { bottom, extendError, ObjectsOnly, pass, Sum } from "./support";
+
 /**
  * Async function wrapper that allows starting, aborting, retrying and
  * progress reporting.
+ *
+ * @template S The status type.
+ * @template P The type of the parameters needed to start.
+ * @template T The type of the produced value.
  */
 export type Task<S, P extends any[], T> = {
   /**
@@ -17,7 +22,7 @@ export type Task<S, P extends any[], T> = {
    * Invokes the branch that corresponds to the current state of the task.
    *
    * Non-stable; will change whenever the internal state changes, namely:
-   * - after calling `Task.start(...P)` (* -> busy `undefined`)
+   * - after calling `Task.start(...P)` (any -> busy `undefined`)
    * - after every call to `Progress.post(S)` by the producer (busy S? -> busy S)
    * - after calling `abort()` (busy S? -> failed `"aborted"`)
    * - when the producer finishes and returns a value (busy S? -> done T)
@@ -31,11 +36,11 @@ export type Task<S, P extends any[], T> = {
      * The task is currently running.
      *
      * @param abort Cancels the task.
-     * @param status The last value posted by the task.
+     * @param status The value posted by the task.
      *
-     * This is `undefined` the first time this branch is matched
-     * (right after starting). After that, this branch will be matched
-     * as many times as `this.post(status)` is called by the task.
+     * This is `undefined` the first time this branch is invoked
+     * (right after starting). After that, this branch will be invoked
+     * as many times as `this.post(S)` is called by the task.
      */
     busy: [abort: () => void, status?: S];
 
@@ -49,8 +54,11 @@ export type Task<S, P extends any[], T> = {
     /**
      * The task threw or the consumer aborted the task.
      *
+     * Not invoked when the task is abandoned by calling `start(...P)`
+     * while busy.
+     *
      * @param reason The value thrown by the producer.
-     * `"aborted"` if the task was aborted by the consumer while busy.
+     * Literal `"aborted"` if the task was aborted by the consumer while busy.
      * @param retry Re-runs the producer with the same parameters.
      * Does nothing if the task was aborted by the consumer while busy.
      */
@@ -61,6 +69,8 @@ export type Task<S, P extends any[], T> = {
 /**
  * Provides methods to the producer to post status updates and get notified
  * when the consumer aborts the task.
+ *
+ * @template S The type of status that can posted.
  */
 export type Progress<S> = {
   /**
@@ -83,7 +93,7 @@ export type Progress<S> = {
    * by the consumer, but the cancellation facilities work as usual and
    * are tied to the status of this task.
    */
-  extend<A extends object>(aux: Exclude<A, Function|any[]>): A & Progress<any>;
+  extend<A extends object>(aux: ObjectsOnly<A>): A & Progress<never>;
 
   /**
    * @param callback Will be invoked when `abort()` is called while busy.
@@ -116,13 +126,14 @@ export type Progress<S> = {
  * This object changes everytime its internal state changes (in sync with the
  * {@link Task.when} function), but its {@link Task.start} function is stable.
  *
- * @see Task
- * @see Progress
+ * @template S The status type.
+ * @template P The producer's parameter list type.
+ * @template T The producer's result type.
  */
 export function useProgressOf<S, P extends any[], T>(
   run: (this: Progress<S>, ...params: P) => Promise<T>
 ): Task<S, P, T> {
-  type State =
+  type Internal =
     | { tag: "idle" }
     | { tag: "started"; params: P }
     | { tag: "pending"; status: S }
@@ -130,7 +141,7 @@ export function useProgressOf<S, P extends any[], T>(
     | { tag: "rejected"; reason: any; params: P }
     | { tag: "aborted" };
 
-  const [state, dispatch] = useState<State>({ tag: "idle" });
+  const [state, dispatch] = useState<Internal>({ tag: "idle" });
   const My = useRef({
     aborted: false,
     calls: 0,
@@ -140,22 +151,26 @@ export function useProgressOf<S, P extends any[], T>(
       for (let cancel of My.cancellers) {
         cancel();
       }
-      My.cancellers.length = 0;
+      My.cancellers = [];
     },
 
     async run(params: P) {
       const round = ++My.calls;
       const job = {
         run,
+        abandoned: null as Error | null,
         isActive() {
           return round === My.calls && !My.aborted;
         },
         assertActive() {
           if (!job.isActive()) {
-            throw new Error("Task abandoned.");
+            job.abandoned ||= extendError(new Error("Task abandoned."), {
+              abandoned: true
+            });
+            throw job.abandoned;
           }
         },
-        extend<A>(sub: A): A & Progress<void> {
+        extend<A>(sub: A): A & Progress<any> {
           return Object.assign(sub, job, { post: job.assertActive });
         },
         onAbort(callback: () => void) {
@@ -170,13 +185,25 @@ export function useProgressOf<S, P extends any[], T>(
       try {
         let payload = await job.run(...params);
         if (job.isActive()) {
-          My.cancellers.length = 0;
+          My.cancellers = [];
           dispatch({ tag: "resolved", payload });
         }
       } catch (reason) {
         if (job.isActive()) {
-          My.cancellers.length = 0;
+          My.cancellers = [];
           dispatch({ tag: "rejected", reason, params });
+        } else {
+          // the task threw between calling `abort()` and the next render phase
+          if (!reason.abandoned) {
+            console.warn("how did this happen?");
+            console.error("caught", reason);
+          }
+          dispatch((prev) => {
+            if (prev.tag !== "aborted") {
+              return { tag: "aborted" };
+            }
+            return prev;
+          });
         }
       }
     },

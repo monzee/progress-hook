@@ -1,6 +1,6 @@
 import axios from "axios";
 import { Progress } from "react-progress-hook";
-import { delay, withTimeout } from "react-progress-hook/dist/support";
+import { delay, withTimeout } from "./support";
 
 // https://github.com/HackerNews/API/blob/master/README.md
 
@@ -117,13 +117,13 @@ export async function fetchPage(
     return [];
   }
   let itemIds = cached.slice(start, start + pageSize);
-  let remaining = itemIds.length;
-  const partial = itemIds.map<number | Root>(() => 0);
-  const lastIndex = remaining - 1;
+  let remaining = pageSize;
+  const lastIndex = pageSize - 1;
+  const partial = [...itemIds] as (number | Root)[];
   this.post(partial);
   let requests = itemIds.map(async (id, i) => {
     if (slowly) {
-      await delay(250 * (lastIndex - i));
+      await delay(Math.floor((lastIndex - i) / 5) * 1_000);
       this.assertActive();
     }
     let item = (await sub.fetchItem(id)) as Root;
